@@ -1,10 +1,15 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from 'users/users.entity';
 import { RefreshToken } from 'users/refresh-token.entity';
 import { Repository } from 'typeorm';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -28,12 +33,22 @@ export class AuthService {
     const findUser = await this.userRepository.findOne({
       where: { username: user.username },
     });
+    if (!findUser) {
+      throw new UnauthorizedException('Username does not exist');
+    }
+    const isPasswordValid = await bcrypt.compare(
+      user.password,
+      findUser.password,
+    );
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Incorrect password');
+    }
     const payload = { username: user.username, sub: user.id };
     const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
     const refreshToken = await this.generateRefreshToken(findUser.id);
 
     return {
-      message: 'Login successful',
       accessToken,
       refreshToken,
     };
@@ -72,5 +87,39 @@ export class AuthService {
       sub: tokenRecord.user.id,
     };
     return this.jwtService.sign(payload, { expiresIn: '15m' });
+  }
+
+  async create(user: User): Promise<User> {
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(user.password, saltRounds);
+    const newUser = this.userRepository.create({
+      username: user.username,
+      password: hashedPassword,
+    });
+    return this.userRepository.save(newUser);
+  }
+
+  async changePassword(
+    userId: number,
+    changePasswordDto: ChangePasswordDto,
+  ): Promise<User> {
+    const { currentPassword, newPassword } = changePasswordDto;
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    user.password = hashedPassword;
+
+    return this.userRepository.save(user);
   }
 }

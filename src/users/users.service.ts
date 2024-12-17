@@ -12,4 +12,7 @@ export class UsersService {
   findOne(username: string) {
     return this.userRepository.findOne({ where: { username } });
   }
+  create(user: User): Promise<User> {
+    return this.userRepository.save(user);
+  }
 }
